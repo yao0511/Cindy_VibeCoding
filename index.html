@@ -1,0 +1,1001 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI 智慧會議時間媒合系統</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React and ReactDOM (UMD) -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <!-- Babel for JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Tailwind Config -->
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0f7ff',
+              100: '#e0effe',
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <!-- Lucide Icons for beautiful visuals -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Noto Sans TC', sans-serif;
+    }
+    /* 自訂精美滾動條 */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-800">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo } = React;
+
+    // React Lucide 圖標組件
+    const Icon = ({ name, className = "w-5 h-5", ...props }) => {
+      useEffect(() => {
+        if (window.lucide) {
+          window.lucide.createIcons();
+        }
+      }, [name, className]);
+      return <i data-lucide={name} class={`${className}`} {...props}></i>;
+    };
+
+    function App() {
+      // 1. 預設初始數據
+      const [meetingTitle, setMeetingTitle] = useState("2026年第二季產品策略規劃會議");
+      const [meetingDesc, setMeetingDesc] = useState("請大家勾選自己方便的時間，Agent 會自動整合出最合適的開會時段。");
+      
+      // 所有受邀的投票人員清單
+      const [invitedMembers, setInvitedMembers] = useState([
+        "小明", "阿華", "美玲", "佳豪", "雅婷", "陳經理", "林設計師"
+      ]);
+
+      // 行事曆的可選日期與時段設定
+      const [calendarSlots, setCalendarSlots] = useState([
+        { id: "slot-1", date: "2026-06-08 (一)", times: ["09:30 - 11:30", "14:00 - 16:00", "16:30 - 18:30"] },
+        { id: "slot-2", date: "2026-06-09 (二)", times: ["10:00 - 12:00", "13:30 - 15:30", "16:00 - 18:00"] },
+        { id: "slot-3", date: "2026-06-10 (三)", times: ["09:00 - 11:00", "14:00 - 16:00", "19:00 - 21:00"] },
+        { id: "slot-4", date: "2026-06-11 (四)", times: ["10:30 - 12:30", "15:00 - 17:00", "17:30 - 19:30"] }
+      ]);
+
+      // 投票狀態紀錄。Key 為人名，Value 為勾選的 "日期_時段" 字串陣列
+      const [votes, setVotes] = useState({
+        "小明": ["2026-06-08 (一)_09:30 - 11:30", "2026-06-08 (一)_14:00 - 16:00", "2026-06-09 (二)_10:00 - 12:00"],
+        "阿華": ["2026-06-08 (一)_09:30 - 11:30", "2026-06-10 (三)_09:00 - 11:00", "2026-06-11 (四)_15:00 - 17:00"],
+        "美玲": ["2026-06-08 (一)_09:30 - 11:30", "2026-06-09 (二)_10:00 - 12:00", "2026-06-10 (三)_14:00 - 16:00", "2026-06-11 (四)_15:00 - 17:00"],
+        "陳經理": ["2026-06-08 (一)_14:00 - 16:00", "2026-06-09 (二)_10:00 - 12:00", "2026-06-10 (三)_14:00 - 16:00"]
+      });
+
+      // 當前正在投票的人名與其臨時選擇
+      const [voterName, setVoterName] = useState("");
+      const [tempSelections, setTempSelections] = useState([]);
+      const [hasVotedBefore, setHasVotedBefore] = useState(false);
+
+      // 管理介面狀態
+      const [isAdminMode, setIsAdminMode] = useState(false);
+      const [newDateInput, setNewDateInput] = useState("");
+      const [newTimeInput, setNewTimeInput] = useState("");
+      const [selectedDateForNewTime, setSelectedDateForNewTime] = useState("");
+      const [newMemberInput, setNewMemberInput] = useState("");
+
+      // 系統提示通知狀態
+      const [notification, setNotification] = useState(null);
+
+      const showNotification = (message, type = "success") => {
+        setNotification({ message, type });
+        setTimeout(() => setNotification(null), 4000);
+      };
+
+      // 偵測輸入的名字是否曾經投過票，有的話幫忙載入舊資料，方便修改
+      useEffect(() => {
+        if (voterName.trim() && votes[voterName.trim()]) {
+          setTempSelections(votes[voterName.trim()]);
+          setHasVotedBefore(true);
+        } else {
+          setTempSelections([]);
+          setHasVotedBefore(false);
+        }
+      }, [voterName, votes]);
+
+      // 初始化下拉選單預設選擇的第一個日期
+      useEffect(() => {
+        if (calendarSlots.length > 0 && !selectedDateForNewTime) {
+          setSelectedDateForNewTime(calendarSlots[0].date);
+        }
+      }, [calendarSlots]);
+
+      // 處理時段點擊 (Toggle)
+      const handleToggleSlot = (date, time) => {
+        if (!voterName.trim()) {
+          showNotification("請先輸入您的名字，才能開始勾選時間喔！", "warning");
+          return;
+        }
+        const key = `${date}_${time}`;
+        if (tempSelections.includes(key)) {
+          setTempSelections(tempSelections.filter(item => item !== key));
+        } else {
+          setTempSelections([...tempSelections, key]);
+        }
+      };
+
+      // 提交投票
+      const handleSubmitVote = (e) => {
+        e.preventDefault();
+        const trimmedName = voterName.trim();
+        if (!trimmedName) {
+          showNotification("請輸入姓名後再提交！", "error");
+          return;
+        }
+
+        // 儲存投票
+        setVotes(prev => ({
+          ...prev,
+          [trimmedName]: tempSelections
+        }));
+
+        // 如果是不在預設受邀名單中的新朋友，自動加入應投票名單
+        if (!invitedMembers.includes(trimmedName)) {
+          setInvitedMembers(prev => [...prev, trimmedName]);
+        }
+
+        showNotification(
+          hasVotedBefore 
+            ? `更新成功！${trimmedName} 的可用時段已成功重新記錄。` 
+            : `投票成功！感謝 ${trimmedName} 參與時間協調。`,
+          "success"
+        );
+        
+        // 提交後重設狀態
+        setVoterName("");
+        setTempSelections([]);
+      };
+
+      // 一鍵清除當前選擇
+      const handleClearSelections = () => {
+        setTempSelections([]);
+      };
+
+      // 2. 智慧統計邏輯 (計算所有時段數據)
+      const statistics = useMemo(() => {
+        const stats = [];
+        calendarSlots.forEach(slot => {
+          slot.times.forEach(time => {
+            const key = `${slot.date}_${time}`;
+            const okPeople = [];
+            
+            // 檢查誰有勾選這時段
+            Object.entries(votes).forEach(([name, chosenKeys]) => {
+              if (chosenKeys.includes(key)) {
+                okPeople.push(name);
+              }
+            });
+
+            stats.push({
+              key,
+              date: slot.date,
+              time,
+              count: okPeople.length,
+              people: okPeople
+            });
+          });
+        });
+
+        // 依據可以的人數從多到少排序
+        return stats.sort((a, b) => b.count - a.count);
+      }, [calendarSlots, votes]);
+
+      // 找出最佳時段與推薦
+      const bestSlots = useMemo(() => {
+        if (statistics.length === 0) return [];
+        const maxCount = statistics[0].count;
+        if (maxCount === 0) return [];
+        return statistics.filter(s => s.count === maxCount);
+      }, [statistics]);
+
+      // 計算已投票與未投票人名
+      const votersStatus = useMemo(() => {
+        const voted = Object.keys(votes);
+        const unvoted = invitedMembers.filter(m => !voted.includes(m));
+        return { voted, unvoted };
+      }, [invitedMembers, votes]);
+
+      // --- 管理功能 ---
+      // 新增日期
+      const handleAddDate = (e) => {
+        e.preventDefault();
+        if (!newDateInput.trim()) return;
+        
+        // 防止重複日期
+        if (calendarSlots.some(s => s.date === newDateInput.trim())) {
+          showNotification("該日期已存在行事曆中囉！", "warning");
+          return;
+        }
+
+        const newSlot = {
+          id: `slot-${Date.now()}`,
+          date: newDateInput.trim(),
+          times: ["09:00 - 11:00", "14:00 - 16:00"] // 預設時段
+        };
+        setCalendarSlots([...calendarSlots, newSlot]);
+        setNewDateInput("");
+        showNotification(`已成功新增日期：${newSlot.date}`);
+      };
+
+      // 刪除日期
+      const handleDeleteDate = (dateToDelete) => {
+        setCalendarSlots(calendarSlots.filter(s => s.date !== dateToDelete));
+        // 清理相關投票
+        const updatedVotes = {};
+        Object.entries(votes).forEach(([name, keys]) => {
+          updatedVotes[name] = keys.filter(key => !key.startsWith(dateToDelete));
+        });
+        setVotes(updatedVotes);
+        showNotification(`已移除日期 ${dateToDelete} 及其所有相關投票數據`, "warning");
+      };
+
+      // 新增特定日期的時段
+      const handleAddTime = (e) => {
+        e.preventDefault();
+        if (!newTimeInput.trim() || !selectedDateForNewTime) return;
+
+        setCalendarSlots(prevSlots => 
+          prevSlots.map(slot => {
+            if (slot.date === selectedDateForNewTime) {
+              if (slot.times.includes(newTimeInput.trim())) {
+                showNotification("該時段已存在！", "warning");
+                return slot;
+              }
+              return {
+                ...slot,
+                times: [...slot.times, newTimeInput.trim()].sort()
+              };
+            }
+            return slot;
+          })
+        );
+        setNewTimeInput("");
+        showNotification(`已為 ${selectedDateForNewTime} 新增時段 ${newTimeInput}`);
+      };
+
+      // 刪除特定日期的時段
+      const handleDeleteTime = (date, timeToDelete) => {
+        setCalendarSlots(prevSlots =>
+          prevSlots.map(slot => {
+            if (slot.date === date) {
+              return {
+                ...slot,
+                times: slot.times.filter(t => t !== timeToDelete)
+              };
+            }
+            return slot;
+          })
+        );
+        
+        // 清理相關投票數據
+        const targetKey = `${date}_${timeToDelete}`;
+        const updatedVotes = {};
+        Object.entries(votes).forEach(([name, keys]) => {
+          updatedVotes[name] = keys.filter(key => key !== targetKey);
+        });
+        setVotes(updatedVotes);
+        showNotification(`已移除時段：${date} ${timeToDelete}`, "warning");
+      };
+
+      // 新增受邀人員
+      const handleAddMember = (e) => {
+        e.preventDefault();
+        const name = newMemberInput.trim();
+        if (!name) return;
+        if (invitedMembers.includes(name)) {
+          showNotification("此人員已在名單中！", "warning");
+          return;
+        }
+        setInvitedMembers([...invitedMembers, name]);
+        setNewMemberInput("");
+        showNotification(`成功邀請新成員：${name}`);
+      };
+
+      // 移除受邀人員
+      const handleRemoveMember = (nameToRemove) => {
+        setInvitedMembers(invitedMembers.filter(m => m !== nameToRemove));
+        // 刪除此人的投票紀錄
+        const updatedVotes = { ...votes };
+        delete updatedVotes[nameToRemove];
+        setVotes(updatedVotes);
+        showNotification(`已移除成員：${nameToRemove}`);
+      };
+
+      // 重設所有投票數據 (乾淨開始)
+      const handleResetAllVotes = () => {
+        if (confirm("您確定要清除所有已投的票嗎？此動作無法復原喔！")) {
+          setVotes({});
+          showNotification("所有投票數據已清空！", "warning");
+        }
+      };
+
+      return (
+        <div class="max-w-7xl mx-auto px-4 py-8">
+          {/* 通知系統 */}
+          {notification && (
+            <div class={`fixed top-5 right-5 z-50 flex items-center gap-3 px-5 py-4 rounded-xl shadow-2xl transition-all duration-300 transform translate-y-0 border text-sm md:text-base ${
+              notification.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
+              notification.type === 'warning' ? 'bg-amber-50 border-amber-200 text-amber-800' :
+              'bg-rose-50 border-rose-200 text-rose-800'
+            }`}>
+              <Icon 
+                name={notification.type === 'success' ? 'check-circle' : 'alert-circle'} 
+                className={`w-6 h-6 ${
+                  notification.type === 'success' ? 'text-emerald-500' :
+                  notification.type === 'warning' ? 'text-amber-500' :
+                  'text-rose-500'
+                }`} 
+              />
+              <span class="font-medium">{notification.message}</span>
+            </div>
+          )}
+
+          {/* 頂部標題區 */}
+          <header class="bg-gradient-to-r from-blue-600 via-indigo-600 to-indigo-700 rounded-3xl p-6 md:p-10 text-white shadow-xl mb-8 relative overflow-hidden">
+            <div class="absolute -right-16 -bottom-16 w-64 h-64 bg-white/10 rounded-full blur-3xl"></div>
+            <div class="absolute -left-16 -top-16 w-64 h-64 bg-indigo-500/20 rounded-full blur-3xl"></div>
+            
+            <div class="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+              <div>
+                <div class="inline-flex items-center gap-2 bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-xs font-semibold tracking-wider uppercase mb-3">
+                  <Icon name="sparkles" className="w-3.5 h-3.5 text-amber-300" />
+                  AI 智慧秘書整合中
+                </div>
+                {isAdminMode ? (
+                  <input 
+                    type="text" 
+                    value={meetingTitle}
+                    onChange={(e) => setMeetingTitle(e.target.value)}
+                    class="bg-white/10 border border-white/20 text-2xl md:text-3xl font-bold rounded-lg px-3 py-1.5 w-full focus:outline-none focus:ring-2 focus:ring-white/50 text-white"
+                  />
+                ) : (
+                  <h1 class="text-2xl md:text-4xl font-extrabold tracking-tight">{meetingTitle}</h1>
+                )}
+                
+                {isAdminMode ? (
+                  <textarea 
+                    value={meetingDesc}
+                    onChange={(e) => setMeetingDesc(e.target.value)}
+                    rows="2"
+                    class="bg-white/10 border border-white/20 text-sm md:text-base mt-2 rounded-lg px-3 py-1.5 w-full focus:outline-none focus:ring-2 focus:ring-white/50 text-indigo-100"
+                  />
+                ) : (
+                  <p class="text-sm md:text-lg text-indigo-100 mt-2 max-w-2xl font-light">{meetingDesc}</p>
+                )}
+              </div>
+
+              <button 
+                onClick={() => setIsAdminMode(!isAdminMode)}
+                class={`flex items-center gap-2 px-5 py-3 rounded-xl font-medium shadow-md transition-all duration-200 shrink-0 ${
+                  isAdminMode 
+                    ? 'bg-amber-400 hover:bg-amber-300 text-slate-900 ring-4 ring-amber-400/30' 
+                    : 'bg-white/10 hover:bg-white/20 text-white border border-white/30'
+                }`}
+              >
+                <Icon name={isAdminMode ? "check-square" : "settings"} className="w-5 h-5" />
+                <span>{isAdminMode ? "完成管理設定" : "進入管理與設定模式"}</span>
+              </button>
+            </div>
+          </header>
+
+          {/* 智慧 Agent 分析結果 (置頂亮點，幫助大家一目了然最優解) */}
+          <section class="mb-8">
+            <div class="bg-gradient-to-br from-indigo-50 to-blue-50 border border-indigo-100 rounded-3xl p-6 shadow-sm">
+              <div class="flex items-center gap-3 mb-4">
+                <div class="p-2.5 bg-indigo-600 rounded-2xl text-white">
+                  <Icon name="bot" className="w-6 h-6" />
+                </div>
+                <div>
+                  <h2 class="text-lg font-bold text-slate-900">Agent 會議排程最佳解分析</h2>
+                  <p class="text-xs text-slate-500">系統即時交叉比對所有人的可出席時段...</p>
+                </div>
+              </div>
+
+              {bestSlots.length > 0 ? (
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+                  <div class="space-y-3">
+                    <span class="inline-flex items-center gap-1.5 bg-emerald-100 text-emerald-800 text-xs px-2.5 py-1 rounded-full font-bold">
+                      <Icon name="award" className="w-3.5 h-3.5" />
+                      最佳推薦時段
+                    </span>
+                    <div class="space-y-2">
+                      {bestSlots.map((slot, index) => (
+                        <div key={index} class="flex items-center gap-3 bg-white p-3.5 rounded-xl border border-indigo-100 shadow-sm">
+                          <Icon name="calendar" className="text-indigo-600 w-5 h-5" />
+                          <div>
+                            <p class="font-bold text-slate-800">{slot.date}</p>
+                            <p class="text-sm font-semibold text-indigo-600">{slot.time}</p>
+                          </div>
+                          <div class="ml-auto text-right">
+                            <span class="text-lg font-black text-indigo-600">{slot.count}</span>
+                            <span class="text-xs text-slate-500"> 人可以參加</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div class="bg-white/60 backdrop-blur-sm p-4.5 rounded-2xl border border-slate-100 h-full flex flex-col justify-center">
+                    <h3 class="text-sm font-bold text-slate-700 mb-2 flex items-center gap-1.5">
+                      <Icon name="info" className="w-4 h-4 text-indigo-500" />
+                      Agent 推薦理由：
+                    </h3>
+                    <p class="text-sm text-slate-600 leading-relaxed">
+                      經過演算法運算，
+                      <span class="font-bold text-indigo-600">
+                        {bestSlots.map(s => `${s.date} ${s.time}`).join(' 或 ')}
+                      </span> 
+                      為目前出席率最高的時間，共有 <strong>{bestSlots[0].count}</strong> 位人員（<strong>{bestSlots[0].people.join("、")}</strong>）勾選該時段。
+                      {votersStatus.unvoted.length > 0 && ` 目前尚有 ${votersStatus.unvoted.length} 位受邀者尚未投票，建議待全員投票完成後進行最終定案。`}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div class="text-center py-6 bg-white/40 rounded-2xl border border-dashed border-slate-200">
+                  <Icon name="calendar-range" className="w-10 h-10 text-slate-400 mx-auto mb-2" />
+                  <p class="text-slate-600 font-medium">目前尚無足夠的投票數據，請大家在下方勾選時間！</p>
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* 投票區與行事曆 */}
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+            
+            {/* 左側：投票輸入面板 */}
+            <div class="lg:col-span-1 space-y-8">
+              {/* 1. 參與者投票表單 */}
+              <div class="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
+                <div class="flex items-center gap-2.5 mb-5 pb-4 border-b border-slate-100">
+                  <Icon name="user-check" className="text-blue-500 w-6 h-6" />
+                  <h2 class="text-lg font-bold text-slate-800">🙋 我要投票 / 修改投票</h2>
+                </div>
+
+                <form onSubmit={handleSubmitVote} class="space-y-4">
+                  <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1.5">您的名字</label>
+                    <div class="relative">
+                      <input 
+                        type="text" 
+                        value={voterName}
+                        onChange={(e) => setVoterName(e.target.value)}
+                        placeholder="請輸入或選擇您的名字"
+                        class="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-slate-800 font-medium"
+                        required
+                      />
+                      <Icon name="user" className="absolute left-3 top-3.5 text-slate-400 w-4.5 h-4.5" />
+                    </div>
+                    
+                    {/* 受邀者名單快速填充 */}
+                    <div class="mt-2.5">
+                      <p class="text-xs text-slate-400 mb-1.5 font-medium">👋 常見成員點擊填入：</p>
+                      <div class="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1">
+                        {invitedMembers.map((name) => (
+                          <button
+                            key={name}
+                            type="button"
+                            onClick={() => setVoterName(name)}
+                            class={`text-xs px-2.5 py-1 rounded-full border transition-all ${
+                              voterName === name 
+                                ? 'bg-blue-600 text-white border-blue-600 font-medium shadow-sm' 
+                                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                            }`}
+                          >
+                            {name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {voterName.trim() && (
+                    <div class="p-4 bg-blue-50/50 rounded-2xl border border-blue-100/50 space-y-3">
+                      <div class="flex justify-between items-center">
+                        <span class="text-xs font-bold text-blue-800">
+                          {hasVotedBefore ? "✏️ 正在編輯已投時間" : "✨ 新增投票時間"}
+                        </span>
+                        <span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-md font-bold">
+                          已選 {tempSelections.length} 個時段
+                        </span>
+                      </div>
+                      
+                      {tempSelections.length > 0 ? (
+                        <div class="max-h-36 overflow-y-auto space-y-1.5 pr-1">
+                          {tempSelections.map(key => {
+                            const [date, time] = key.split('_');
+                            return (
+                              <div key={key} class="flex items-center justify-between bg-white px-3 py-1.5 rounded-lg border border-blue-100 text-xs">
+                                <span class="font-medium text-slate-700">{date} - {time}</span>
+                                <button 
+                                  type="button" 
+                                  onClick={() => setTempSelections(tempSelections.filter(x => x !== key))}
+                                  class="text-rose-500 hover:text-rose-700 p-0.5"
+                                >
+                                  <Icon name="x" className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p class="text-xs text-slate-400 py-2 text-center">請在右側行事曆中，直接點選您可以開會的時間！</p>
+                      )}
+
+                      <div class="flex gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={handleClearSelections}
+                          class="flex-1 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all"
+                        >
+                          清除重勾
+                        </button>
+                        <button
+                          type="submit"
+                          class="flex-1 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-sm transition-all"
+                        >
+                          {hasVotedBefore ? "確認更新" : "送出投票"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </form>
+              </div>
+
+              {/* 2. 催票看板 (已投 / 未投狀態) */}
+              <div class="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
+                <div class="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
+                  <div class="flex items-center gap-2.5">
+                    <Icon name="bell" className="text-amber-500 w-5.5 h-5.5" />
+                    <h2 class="text-lg font-bold text-slate-800">📢 催票與參與度看板</h2>
+                  </div>
+                  <span class="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-full font-bold">
+                    共 {invitedMembers.length} 人
+                  </span>
+                </div>
+
+                <div class="space-y-4">
+                  {/* 已投票 */}
+                  <div>
+                    <div class="flex justify-between items-center mb-2">
+                      <span class="text-sm font-bold text-slate-700 flex items-center gap-1">
+                        <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span>
+                        已投票 ({votersStatus.voted.length}人)
+                      </span>
+                      <span class="text-xs font-extrabold text-emerald-600">
+                        {invitedMembers.length > 0 ? Math.round((votersStatus.voted.length / invitedMembers.length) * 100) : 0}%
+                      </span>
+                    </div>
+                    {votersStatus.voted.length > 0 ? (
+                      <div class="flex flex-wrap gap-1.5 p-3 bg-emerald-50/30 rounded-2xl border border-emerald-100/50">
+                        {votersStatus.voted.map(name => (
+                          <div key={name} class="group relative flex items-center gap-1 text-xs bg-white text-slate-700 px-2.5 py-1 rounded-lg border border-emerald-100">
+                            <span class="font-medium">{name}</span>
+                            <span class="text-[10px] bg-emerald-100 text-emerald-700 px-1 py-0.2 rounded font-black">
+                              {votes[name]?.length || 0}
+                            </span>
+                            {/* 快速刪除此人投票 */}
+                            <button 
+                              onClick={() => {
+                                if (confirm(`確定要刪除 ${name} 的投票紀錄嗎？`)) {
+                                  const updated = { ...votes };
+                                  delete updated[name];
+                                  setVotes(updated);
+                                  showNotification(`已移除 ${name} 的投票`);
+                                }
+                              }}
+                              class="opacity-0 group-hover:opacity-100 absolute -top-1.5 -right-1.5 bg-rose-500 text-white rounded-full p-0.5 hover:bg-rose-600 shadow-sm transition-all"
+                            >
+                              <Icon name="x" className="w-2.5 h-2.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p class="text-xs text-slate-400 py-3 text-center bg-slate-50 rounded-2xl">尚無投票，快當第一個！</p>
+                    )}
+                  </div>
+
+                  {/* 未投票 */}
+                  <div>
+                    <div class="flex justify-between items-center mb-2">
+                      <span class="text-sm font-bold text-slate-700 flex items-center gap-1">
+                        <span class="w-2.5 h-2.5 rounded-full bg-rose-400 inline-block"></span>
+                        未投票 ({votersStatus.unvoted.length}人)
+                      </span>
+                      {votersStatus.unvoted.length > 0 && (
+                        <button
+                          onClick={() => {
+                            const names = votersStatus.unvoted.join(", ");
+                            navigator.clipboard.writeText(`哈囉！提醒以下夥伴記得填寫會議時間喔：${names}`);
+                            showNotification("已複製催票提醒到剪貼簿！", "success");
+                          }}
+                          class="text-xs text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 bg-indigo-50 px-2 py-1 rounded-lg"
+                        >
+                          <Icon name="copy" className="w-3 h-3" />
+                          複製催票名單
+                        </button>
+                      )}
+                    </div>
+                    {votersStatus.unvoted.length > 0 ? (
+                      <div class="flex flex-wrap gap-1.5 p-3 bg-rose-50/20 rounded-2xl border border-rose-100/50">
+                        {votersStatus.unvoted.map(name => (
+                          <div key={name} class="text-xs bg-white text-slate-600 px-2.5 py-1 rounded-lg border border-slate-200">
+                            {name}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p class="text-xs text-slate-500 py-3 text-center bg-emerald-50 rounded-2xl font-semibold text-emerald-800">🎉 全員皆已完成投票！</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 右側：行事曆視覺化面板 (佔 2 欄) */}
+            <div class="lg:col-span-2 space-y-8">
+              <div class="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-100">
+                  <div>
+                    <h2 class="text-xl font-bold text-slate-800 flex items-center gap-2">
+                      <Icon name="calendar-days" className="text-blue-600 w-6 h-6" />
+                      開會日期時段選擇器
+                    </h2>
+                    <p class="text-xs text-slate-400 mt-1">
+                      {voterName.trim() 
+                        ? `👉 點擊以下方格勾選您 [${voterName}] 可開會的時間` 
+                        : "⚠️ 請先在左側輸入您的名字，再點擊下方時段進行勾選"}
+                    </p>
+                  </div>
+                  
+                  {/* 時段顏色圖例 */}
+                  <div class="flex items-center gap-3 text-xs">
+                    <span class="flex items-center gap-1.5 text-slate-500">
+                      <span class="w-3.5 h-3.5 bg-slate-50 border border-slate-200 rounded-md"></span>
+                      可勾選
+                    </span>
+                    <span class="flex items-center gap-1.5 text-blue-600 font-medium">
+                      <span class="w-3.5 h-3.5 bg-blue-600 rounded-md"></span>
+                      我方便
+                    </span>
+                  </div>
+                </div>
+
+                {/* 週行事曆直欄式版面 */}
+                {calendarSlots.length > 0 ? (
+                  <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                    {calendarSlots.map((slot) => (
+                      <div key={slot.id} class="bg-slate-50/70 border border-slate-200/60 rounded-2xl p-4 flex flex-col justify-between relative group/date">
+                        
+                        {/* 刪除日期按鈕 (管理模式下顯示) */}
+                        {isAdminMode && (
+                          <button
+                            onClick={() => handleDeleteDate(slot.date)}
+                            class="absolute -top-2 -right-2 bg-rose-500 hover:bg-rose-600 text-white rounded-full p-1 shadow-md z-10"
+                            title="刪除此日期"
+                          >
+                            <Icon name="trash-2" className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+
+                        <div class="text-center pb-3 border-b border-slate-200/80 mb-3">
+                          <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">DATE</p>
+                          <h3 class="font-bold text-slate-800 text-sm md:text-base mt-0.5">{slot.date}</h3>
+                        </div>
+
+                        {/* 時段區塊 */}
+                        <div class="space-y-2 flex-grow">
+                          {slot.times.map((time, idx) => {
+                            const slotKey = `${slot.date}_${time}`;
+                            const isSelected = tempSelections.includes(slotKey);
+                            
+                            // 計算在這個時段已經有哪些人投過票
+                            const whoVotedThis = Object.entries(votes)
+                              .filter(([name, keys]) => keys.includes(slotKey))
+                              .map(([name]) => name);
+
+                            return (
+                              <div key={idx} class="relative group/time">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleSlot(slot.date, time)}
+                                  class={`w-full py-3.5 px-3 rounded-xl border text-center transition-all duration-200 flex flex-col items-center justify-center gap-1 ${
+                                    isSelected 
+                                      ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-500/20 transform scale-[1.02]' 
+                                      : 'bg-white text-slate-700 border-slate-200 hover:border-blue-400 hover:bg-blue-50/30'
+                                  }`}
+                                >
+                                  <span class="text-xs font-bold tracking-wide">{time}</span>
+                                  
+                                  {/* 已選人數小標籤 */}
+                                  {whoVotedThis.length > 0 && (
+                                    <span class={`text-[10px] px-1.5 py-0.5 rounded-full font-extrabold ${
+                                      isSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
+                                    }`}>
+                                      {whoVotedThis.length} 人可以
+                                    </span>
+                                  )}
+                                </button>
+
+                                {/* 刪除時段按鈕 (管理模式下顯示) */}
+                                {isAdminMode && (
+                                  <button
+                                    onClick={() => handleDeleteTime(slot.date, time)}
+                                    class="absolute -top-1.5 -right-1.5 bg-slate-200 hover:bg-rose-500 hover:text-white text-slate-600 rounded-full p-0.5 shadow-sm opacity-0 group-hover/time:opacity-100 transition-all z-10"
+                                    title="刪除此時段"
+                                  >
+                                    <Icon name="x" className="w-2.5 h-2.5" />
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div class="text-center py-12 text-slate-400 border border-dashed border-slate-200 rounded-2xl">
+                    <Icon name="calendar-off" className="w-12 h-12 mx-auto mb-3 text-slate-300" />
+                    <p class="font-medium">行事曆目前是空的！請點擊右上角「進入管理與設定模式」來新增會議時間。</p>
+                  </div>
+                )}
+              </div>
+
+              {/* 熱門時段票數排行榜 & 具體名單 */}
+              <div class="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
+                <div class="flex items-center justify-between mb-6 pb-4 border-b border-slate-100">
+                  <div class="flex items-center gap-2.5">
+                    <Icon name="bar-chart-3" className="text-indigo-600 w-6 h-6" />
+                    <h2 class="text-lg font-bold text-slate-800">📊 所有時段統計與名單排行榜</h2>
+                  </div>
+                  <span class="text-xs text-slate-400 font-medium">依人數由多至少排序</span>
+                </div>
+
+                <div class="space-y-4">
+                  {statistics.map((stat, index) => {
+                    // 計算百分比
+                    const totalInvited = invitedMembers.length || 1;
+                    const percent = Math.round((stat.count / totalInvited) * 100);
+
+                    return (
+                      <div key={stat.key} class="p-4 rounded-2xl border border-slate-100 hover:border-indigo-100 hover:bg-slate-50/50 transition-all">
+                        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                          
+                          {/* 1. 時間標題 */}
+                          <div class="flex items-center gap-3">
+                            <div class={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-sm ${
+                              index === 0 && stat.count > 0 ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'
+                            }`}>
+                              {index + 1}
+                            </div>
+                            <div>
+                              <p class="text-sm font-bold text-slate-800">{stat.date}</p>
+                              <p class="text-xs font-semibold text-indigo-600">{stat.time}</p>
+                            </div>
+                          </div>
+
+                          {/* 2. 出席進度條與人數 */}
+                          <div class="flex-1 max-w-md">
+                            <div class="flex justify-between items-center text-xs mb-1.5">
+                              <span class="font-medium text-slate-400">出席比率</span>
+                              <span class="font-bold text-slate-700">{stat.count} / {invitedMembers.length} 人 ({percent}%)</span>
+                            </div>
+                            <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                              <div 
+                                class={`h-full rounded-full transition-all duration-500 ${
+                                  index === 0 && stat.count > 0 ? 'bg-indigo-600' : 'bg-slate-400'
+                                }`} 
+                                style={{ width: `${percent}%` }}
+                              ></div>
+                            </div>
+                          </div>
+
+                          {/* 3. 具體名單 */}
+                          <div class="min-w-[150px] text-right md:text-left">
+                            <p class="text-[11px] text-slate-400 font-medium uppercase">誰可以參加：</p>
+                            <div class="flex flex-wrap gap-1 mt-1 justify-end md:justify-start">
+                              {stat.people.length > 0 ? (
+                                stat.people.map(p => (
+                                  <span key={p} class="text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-medium border border-slate-200/50">
+                                    {p}
+                                  </span>
+                                ))
+                              ) : (
+                                <span class="text-xs text-slate-400 italic">無人可配合</span>
+                              )}
+                            </div>
+                          </div>
+
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          {/* 管理模式抽屜/下方控制板 (只有當 isAdminMode = true 時才顯示) */}
+          {isAdminMode && (
+            <section class="mt-8 bg-slate-900 text-white rounded-3xl p-6 md:p-8 shadow-2xl border border-slate-800 relative overflow-hidden transition-all duration-300">
+              <div class="absolute right-0 top-0 w-32 h-32 bg-amber-500/10 rounded-full blur-2xl"></div>
+              
+              <div class="flex items-center gap-2 mb-6 pb-4 border-b border-slate-800">
+                <Icon name="sliders" className="text-amber-400 w-6 h-6" />
+                <div>
+                  <h2 class="text-xl font-bold">⚙️ 發起人進階管理面板</h2>
+                  <p class="text-xs text-slate-400">您可以重新定義會議主題、新增/刪除行程日期、編輯受邀團隊成員名單。</p>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                {/* 1. 管理日期 */}
+                <div class="space-y-4">
+                  <h3 class="text-sm font-bold text-amber-300 flex items-center gap-1.5">
+                    <Icon name="calendar-plus" className="w-4 h-4" />
+                    新增行程日期
+                  </h3>
+                  <form onSubmit={handleAddDate} class="space-y-3">
+                    <div>
+                      <label class="block text-xs text-slate-400 mb-1">日期格式 (如: 2026-06-12 (五))</label>
+                      <input 
+                        type="text" 
+                        value={newDateInput}
+                        onChange={(e) => setNewDateInput(e.target.value)}
+                        placeholder="請輸入日期"
+                        class="w-full px-3.5 py-2.5 bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400 text-sm text-white"
+                        required
+                      />
+                    </div>
+                    <button 
+                      type="submit"
+                      class="w-full bg-amber-400 hover:bg-amber-300 text-slate-900 font-bold py-2 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-1"
+                    >
+                      <Icon name="plus" className="w-3.5 h-3.5" />
+                      新增日期
+                    </button>
+                  </form>
+                </div>
+
+                {/* 2. 管理時段 */}
+                <div class="space-y-4">
+                  <h3 class="text-sm font-bold text-amber-300 flex items-center gap-1.5">
+                    <Icon name="clock" className="w-4 h-4" />
+                    為日期新增特定時段
+                  </h3>
+                  <form onSubmit={handleAddTime} class="space-y-3">
+                    <div>
+                      <label class="block text-xs text-slate-400 mb-1">選擇指定日期</label>
+                      <select 
+                        value={selectedDateForNewTime} 
+                        onChange={(e) => setSelectedDateForNewTime(e.target.value)}
+                        class="w-full px-3.5 py-2.5 bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400 text-sm text-white"
+                      >
+                        {calendarSlots.map(s => (
+                          <option key={s.id} value={s.date}>{s.date}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-xs text-slate-400 mb-1">時段格式 (如: 14:00 - 16:00)</label>
+                      <input 
+                        type="text" 
+                        value={newTimeInput}
+                        onChange={(e) => setNewTimeInput(e.target.value)}
+                        placeholder="請輸入時段"
+                        class="w-full px-3.5 py-2.5 bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400 text-sm text-white"
+                        required
+                      />
+                    </div>
+                    <button 
+                      type="submit"
+                      class="w-full bg-amber-400 hover:bg-amber-300 text-slate-900 font-bold py-2 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-1"
+                    >
+                      <Icon name="plus" className="w-3.5 h-3.5" />
+                      新增時段
+                    </button>
+                  </form>
+                </div>
+
+                {/* 3. 應投票成員管理與重設 */}
+                <div class="space-y-4">
+                  <h3 class="text-sm font-bold text-amber-300 flex items-center gap-1.5">
+                    <Icon name="users" className="w-4 h-4" />
+                    邀請 / 移除受邀成員 ({invitedMembers.length}人)
+                  </h3>
+                  
+                  <form onSubmit={handleAddMember} class="flex gap-2">
+                    <input 
+                      type="text" 
+                      value={newMemberInput}
+                      onChange={(e) => setNewMemberInput(e.target.value)}
+                      placeholder="新夥伴名字"
+                      class="flex-1 px-3.5 py-2 bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400 text-sm text-white"
+                    />
+                    <button 
+                      type="submit"
+                      class="bg-amber-400 hover:bg-amber-300 text-slate-900 font-bold px-3 rounded-xl text-xs transition-all"
+                    >
+                      加入
+                    </button>
+                  </form>
+
+                  {/* 顯示受邀清單並允許刪除 */}
+                  <div class="max-h-24 overflow-y-auto border border-slate-800 p-2 rounded-xl space-y-1 bg-slate-950/50">
+                    {invitedMembers.map(name => (
+                      <div key={name} class="flex items-center justify-between text-xs py-1 px-2 hover:bg-slate-900 rounded">
+                        <span class="text-slate-300">{name}</span>
+                        <button 
+                          onClick={() => handleRemoveMember(name)}
+                          class="text-rose-400 hover:text-rose-600"
+                        >
+                          <Icon name="trash-2" className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* 重設全部資料 */}
+                  <div class="pt-2">
+                    <button 
+                      onClick={handleResetAllVotes}
+                      class="w-full bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/30 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1"
+                    >
+                      <Icon name="trash" className="w-3.5 h-3.5" />
+                      清空現有投票數據
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
+          <footer class="mt-12 text-center text-xs text-slate-400">
+            <p>© 2026 AI 智慧會議排程 Agent 系統. 支援自動化最佳解推算與追蹤</p>
+          </footer>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
