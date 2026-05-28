@@ -71,31 +71,49 @@
       return <i data-lucide={name} class={`${className}`} {...props}></i>;
     };
 
+    // localStorage 讀寫工具
+    const LS_KEYS = {
+      title: 'meeting_title',
+      desc: 'meeting_desc',
+      members: 'invited_members',
+      slots: 'calendar_slots',
+      votes: 'votes',
+    };
+    const loadLS = (key, defaultValue) => {
+      try {
+        const raw = localStorage.getItem(key);
+        return raw !== null ? JSON.parse(raw) : defaultValue;
+      } catch { return defaultValue; }
+    };
+    const saveLS = (key, value) => {
+      try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+    };
+
     function App() {
-      // 1. 預設初始數據
-      const [meetingTitle, setMeetingTitle] = useState("2026年第二季產品策略規劃會議");
-      const [meetingDesc, setMeetingDesc] = useState("請大家勾選自己方便的時間，Agent 會自動整合出最合適的開會時段。");
+      // 1. 預設初始數據（優先從 localStorage 讀取）
+      const [meetingTitle, setMeetingTitle] = useState(() => loadLS(LS_KEYS.title, "2026年第二季產品策略規劃會議"));
+      const [meetingDesc, setMeetingDesc] = useState(() => loadLS(LS_KEYS.desc, "請大家勾選自己方便的時間，Agent 會自動整合出最合適的開會時段。"));
       
       // 所有受邀的投票人員清單
-      const [invitedMembers, setInvitedMembers] = useState([
+      const [invitedMembers, setInvitedMembers] = useState(() => loadLS(LS_KEYS.members, [
         "小明", "阿華", "美玲", "佳豪", "雅婷", "陳經理", "林設計師"
-      ]);
+      ]));
 
       // 行事曆的可選日期與時段設定
-      const [calendarSlots, setCalendarSlots] = useState([
+      const [calendarSlots, setCalendarSlots] = useState(() => loadLS(LS_KEYS.slots, [
         { id: "slot-1", date: "2026-06-08 (一)", times: ["09:30 - 11:30", "14:00 - 16:00", "16:30 - 18:30"] },
         { id: "slot-2", date: "2026-06-09 (二)", times: ["10:00 - 12:00", "13:30 - 15:30", "16:00 - 18:00"] },
         { id: "slot-3", date: "2026-06-10 (三)", times: ["09:00 - 11:00", "14:00 - 16:00", "19:00 - 21:00"] },
         { id: "slot-4", date: "2026-06-11 (四)", times: ["10:30 - 12:30", "15:00 - 17:00", "17:30 - 19:30"] }
-      ]);
+      ]));
 
       // 投票狀態紀錄。Key 為人名，Value 為勾選的 "日期_時段" 字串陣列
-      const [votes, setVotes] = useState({
+      const [votes, setVotes] = useState(() => loadLS(LS_KEYS.votes, {
         "小明": ["2026-06-08 (一)_09:30 - 11:30", "2026-06-08 (一)_14:00 - 16:00", "2026-06-09 (二)_10:00 - 12:00"],
         "阿華": ["2026-06-08 (一)_09:30 - 11:30", "2026-06-10 (三)_09:00 - 11:00", "2026-06-11 (四)_15:00 - 17:00"],
         "美玲": ["2026-06-08 (一)_09:30 - 11:30", "2026-06-09 (二)_10:00 - 12:00", "2026-06-10 (三)_14:00 - 16:00", "2026-06-11 (四)_15:00 - 17:00"],
         "陳經理": ["2026-06-08 (一)_14:00 - 16:00", "2026-06-09 (二)_10:00 - 12:00", "2026-06-10 (三)_14:00 - 16:00"]
-      });
+      }));
 
       // 當前正在投票的人名與其臨時選擇
       const [voterName, setVoterName] = useState("");
@@ -116,6 +134,13 @@
         setNotification({ message, type });
         setTimeout(() => setNotification(null), 4000);
       };
+
+      // 同步 localStorage
+      useEffect(() => { saveLS(LS_KEYS.title, meetingTitle); }, [meetingTitle]);
+      useEffect(() => { saveLS(LS_KEYS.desc, meetingDesc); }, [meetingDesc]);
+      useEffect(() => { saveLS(LS_KEYS.members, invitedMembers); }, [invitedMembers]);
+      useEffect(() => { saveLS(LS_KEYS.slots, calendarSlots); }, [calendarSlots]);
+      useEffect(() => { saveLS(LS_KEYS.votes, votes); }, [votes]);
 
       // 偵測輸入的名字是否曾經投過票，有的話幫忙載入舊資料，方便修改
       useEffect(() => {
