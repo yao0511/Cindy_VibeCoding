@@ -14,6 +14,7 @@
   <!-- Firebase SDK (compat) -->
   <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
   <!-- Tailwind Config -->
   <script>
     tailwind.config = {
@@ -69,13 +70,24 @@
       appId: "1:923286315467:web:225e78c80f1fd64dc3564e",
     };
 
+    // ─── 管理員設定 ───────────────────────────────────────
+    // 將有管理員權限的 Google Email 填入下方陣列
+    // 管理員可以新增/刪除日期時段、刪除他人投票、修改會議標題
+    var ADMIN_EMAILS = [
+      "your-admin@gmail.com",        // ← 換成您的 Google Email
+      // "another-admin@gmail.com",  // 多位管理員可繼續新增
+    ];
+    // ──────────────────────────────────────────────────────
+
     var isFirebaseConfigured = firebaseConfig.apiKey !== "YOUR_API_KEY";
     var db = null;
+    var googleProvider = null;
 
     if (isFirebaseConfigured) {
       try {
         firebase.initializeApp(firebaseConfig);
         db = firebase.database();
+        googleProvider = new firebase.auth.GoogleAuthProvider();
       } catch (e) {
         console.error("Firebase 初始化失敗:", e);
       }
@@ -204,6 +216,9 @@
       const [tempSelections, setTempSelections] = useState([]);
       const [hasVotedBefore, setHasVotedBefore] = useState(false);
 
+      const [currentUser, setCurrentUser] = useState(null);
+      const isAdmin = !!(currentUser && window.ADMIN_EMAILS && window.ADMIN_EMAILS.includes(currentUser.email));
+
       const [isAdminMode, setIsAdminMode] = useState(false);
       const [newDateInput, setNewDateInput] = useState("");
       const [newTimeInput, setNewTimeInput] = useState("");
@@ -215,6 +230,40 @@
       const showNotification = (message, type = "success") => {
         setNotification({ message, type });
         setTimeout(() => setNotification(null), 4000);
+      };
+
+      // ── Google OAuth 登入/登出 ────────────────────────
+      useEffect(() => {
+        if (!window.isFirebaseConfigured) return;
+        const unsubscribe = firebase.auth().onAuthStateChanged((user) => {
+          setCurrentUser(user);
+          if (!user) setIsAdminMode(false);
+        });
+        return () => unsubscribe();
+      }, []);
+
+      const handleGoogleLogin = async () => {
+        try {
+          const result = await firebase.auth().signInWithPopup(window.googleProvider);
+          const email = result.user.email;
+          if (!window.ADMIN_EMAILS.includes(email)) {
+            showNotification(`${email} 不在管理員名單中`, "error");
+            await firebase.auth().signOut();
+          } else {
+            showNotification(`歡迎，${result.user.displayName}！已取得管理員權限`, "success");
+            setIsAdminMode(true);
+          }
+        } catch (err) {
+          if (err.code !== 'auth/popup-closed-by-user') {
+            showNotification("登入失敗，請再試一次", "error");
+          }
+        }
+      };
+
+      const handleLogout = async () => {
+        await firebase.auth().signOut();
+        setIsAdminMode(false);
+        showNotification("已登出管理員帳號");
       };
 
       // ── Firebase 即時監聽 ──────────────────────────────
@@ -516,17 +565,44 @@
                 )}
               </div>
 
-              <button
-                onClick={handleToggleAdminMode}
-                class={`flex items-center gap-2 px-5 py-3 rounded-xl font-medium shadow-md transition-all duration-200 shrink-0 ${
-                  isAdminMode
-                    ? 'bg-amber-400 hover:bg-amber-300 text-slate-900 ring-4 ring-amber-400/30'
-                    : 'bg-white/10 hover:bg-white/20 text-white border border-white/30'
-                }`}
-              >
-                <Icon name={isAdminMode ? "check-square" : "settings"} className="w-5 h-5" />
-                <span>{isAdminMode ? "完成管理設定" : "進入管理與設定模式"}</span>
-              </button>
+              {isAdmin ? (
+                <div class="flex items-center gap-3 shrink-0">
+                  <button
+                    onClick={handleToggleAdminMode}
+                    class={`flex items-center gap-2 px-5 py-3 rounded-xl font-medium shadow-md transition-all duration-200 ${
+                      isAdminMode
+                        ? 'bg-amber-400 hover:bg-amber-300 text-slate-900 ring-4 ring-amber-400/30'
+                        : 'bg-white/10 hover:bg-white/20 text-white border border-white/30'
+                    }`}
+                  >
+                    <Icon name={isAdminMode ? "check-square" : "settings"} className="w-5 h-5" />
+                    <span>{isAdminMode ? "完成管理設定" : "管理模式"}</span>
+                  </button>
+                  <div class="flex items-center gap-2 bg-white/10 border border-white/20 px-3 py-2.5 rounded-xl">
+                    {currentUser.photoURL && (
+                      <img src={currentUser.photoURL} alt="" class="w-6 h-6 rounded-full" />
+                    )}
+                    <span class="text-xs text-white font-medium max-w-[100px] truncate">
+                      {currentUser.displayName}
+                    </span>
+                    <button
+                      onClick={handleLogout}
+                      title="登出管理員"
+                      class="text-white/60 hover:text-white transition-colors ml-1"
+                    >
+                      <Icon name="log-out" className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={handleGoogleLogin}
+                  class="flex items-center gap-2 px-5 py-3 rounded-xl font-medium bg-white/10 hover:bg-white/20 text-white border border-white/30 shadow-md transition-all duration-200 shrink-0"
+                >
+                  <Icon name="shield" className="w-4 h-4 text-amber-300" />
+                  <span>管理員登入</span>
+                </button>
+              )}
             </div>
           </header>
 
@@ -723,6 +799,7 @@
                             <span class="text-[10px] bg-emerald-100 text-emerald-700 px-1 py-0.2 rounded font-black">
                               {votes[name]?.length || 0}
                             </span>
+                            {isAdmin && (
                             <button
                               onClick={() => {
                                 if (confirm(`確定要刪除 ${name} 的投票紀錄嗎？`)) {
@@ -734,6 +811,7 @@
                             >
                               <Icon name="x" className="w-2.5 h-2.5" />
                             </button>
+                            )}
                           </div>
                         ))}
                       </div>
