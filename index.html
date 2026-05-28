@@ -817,17 +817,19 @@
                             <span class="text-[10px] bg-emerald-100 text-emerald-700 px-1 py-0.2 rounded font-black">
                               {votes[name]?.length || 0}
                             </span>
-                            <button
-                              onClick={() => {
-                                if (confirm(`確定要刪除 ${name} 的投票紀錄嗎？`)) {
-                                  window.db.ref(`${MEETING_REF}/votes/${name}`).remove();
-                                  showNotification(`已移除 ${name} 的投票`);
-                                }
-                              }}
-                              class="opacity-0 group-hover:opacity-100 absolute -top-1.5 -right-1.5 bg-rose-500 text-white rounded-full p-0.5 hover:bg-rose-600 shadow-sm transition-all"
-                            >
-                              <Icon name="x" className="w-2.5 h-2.5" />
-                            </button>
+                            {isAdminMode && (
+                              <button
+                                onClick={() => {
+                                  if (confirm(`確定要刪除 ${name} 的投票紀錄嗎？`)) {
+                                    window.db.ref(`${MEETING_REF}/votes/${name}`).remove();
+                                    showNotification(`已移除 ${name} 的投票`);
+                                  }
+                                }}
+                                class="opacity-0 group-hover:opacity-100 absolute -top-1.5 -right-1.5 bg-rose-500 text-white rounded-full p-0.5 hover:bg-rose-600 shadow-sm transition-all"
+                              >
+                                <Icon name="x" className="w-2.5 h-2.5" />
+                              </button>
+                            )}
                           </div>
                         ))}
                       </div>
