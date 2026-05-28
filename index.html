@@ -95,6 +95,15 @@
     // Firebase 路徑
     const MEETING_REF = 'meeting-v1';
 
+    // 管理員帳號密碼（SHA-256 雜湊，不儲存明文）
+    const ADMIN_USER = 'admin';
+    const ADMIN_PASS_HASH = 'c371e70e6bc25c63f577b284b46a00edfcfff77d84994ebcff1ac15bfd864706';
+
+    const hashString = async (str) => {
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    };
+
     // 將 Firebase 回傳值（可能是 object 或 array）統一轉為 array
     const toArray = (val) => {
       if (!val) return [];
@@ -221,9 +230,10 @@
         setTimeout(() => setNotification(null), 4000);
       };
 
-      const handleAdminLoginSubmit = (e) => {
+      const handleAdminLoginSubmit = async (e) => {
         e.preventDefault();
-        if (loginUser === 'admin' && loginPass === 'cindyalwayslate') {
+        const inputHash = await hashString(loginPass);
+        if (loginUser === ADMIN_USER && inputHash === ADMIN_PASS_HASH) {
           setIsAdminMode(true);
           setShowAdminLogin(false);
           setLoginUser('');
