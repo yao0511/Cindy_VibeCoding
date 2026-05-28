@@ -119,6 +119,13 @@
       }));
     };
 
+    // "2026-06-12" → "2026-06-12 (五)"
+    const formatDateWithWeekday = (isoDate) => {
+      const [y, m, d] = isoDate.split('-').map(Number);
+      const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
+      return `${isoDate} (${weekdays[new Date(y, m - 1, d).getDay()]})`;
+    };
+
     const parseVotes = (rawVotes) => {
       if (!rawVotes) return {};
       return Object.fromEntries(
@@ -266,7 +273,7 @@
           setMeetingTitle(data.title || DEFAULT_DATA.title);
           setMeetingDesc(data.desc || DEFAULT_DATA.desc);
           setInvitedMembers(toArray(data.members).filter(Boolean));
-          setCalendarSlots(parseSlots(data.slots));
+          setCalendarSlots(parseSlots(data.slots).sort((a, b) => a.date.localeCompare(b.date)));
           setVotes(parseVotes(data.votes));
           setIsLoading(false);
         };
@@ -381,19 +388,20 @@
 
       const handleAddDate = (e) => {
         e.preventDefault();
-        if (!newDateInput.trim()) return;
-        if (calendarSlots.some(s => s.date === newDateInput.trim())) {
+        if (!newDateInput) return;
+        const formatted = formatDateWithWeekday(newDateInput);
+        if (calendarSlots.some(s => s.date === formatted)) {
           showNotification("該日期已存在行事曆中囉！", "warning");
           return;
         }
         const newSlot = {
           id: `slot-${Date.now()}`,
-          date: newDateInput.trim(),
+          date: formatted,
           times: ["09:00 - 11:00", "14:00 - 16:00"]
         };
         window.db.ref(`${MEETING_REF}/slots`).set([...calendarSlots, newSlot]);
         setNewDateInput("");
-        showNotification(`已成功新增日期：${newSlot.date}`);
+        showNotification(`已成功新增日期：${formatted}`);
       };
 
       const handleDeleteDate = (dateToDelete) => {
@@ -1065,13 +1073,12 @@
                   </h3>
                   <form onSubmit={handleAddDate} class="space-y-3">
                     <div>
-                      <label class="block text-xs text-slate-400 mb-1">日期格式 (如: 2026-06-12 (五))</label>
+                      <label class="block text-xs text-slate-400 mb-1">選擇日期</label>
                       <input
-                        type="text"
+                        type="date"
                         value={newDateInput}
                         onChange={(e) => setNewDateInput(e.target.value)}
-                        placeholder="請輸入日期"
-                        class="w-full px-3.5 py-2.5 bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400 text-sm text-white"
+                        class="w-full px-3.5 py-2.5 bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400 text-sm text-white [color-scheme:dark]"
                         required
                       />
                     </div>
